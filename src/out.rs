@@ -10,9 +10,9 @@ use crate::slot::Slot;
 /// Morally equivalent to [`Slot<'s, MaybeUninit<T>>`][Slot], but supports dynamically sized types.
 // TODO: document methods and safety invariant.
 // Note that this could be contravariant in T, but this isn't possible.
-pub struct Uninit<'s, T: ?Sized>(ScopedPtr<'s, T>);
+pub struct Out<'s, T: ?Sized>(ScopedPtr<'s, T>);
 
-impl<'s, T: ?Sized> Uninit<'s, T> {
+impl<'s, T: ?Sized> Out<'s, T> {
     #[inline]
     pub(crate) unsafe fn from_raw(raw: ScopedPtr<'s, T>) -> Self {
         Self(raw)
@@ -39,7 +39,7 @@ impl<'s, T: ?Sized> Uninit<'s, T> {
     }
 }
 
-impl<'s, T> Uninit<'s, T> {
+impl<'s, T> Out<'s, T> {
     #[inline]
     pub fn as_uninit(&self) -> &MaybeUninit<T>
     where
@@ -68,7 +68,7 @@ impl<'s, T> Uninit<'s, T> {
     }
 }
 
-impl<'s, T> Uninit<'s, [T]> {
+impl<'s, T> Out<'s, [T]> {
     #[inline]
     pub fn as_uninit_slice(&mut self) -> &mut [MaybeUninit<T>] {
         let len = <[T] as crate::SliceLike>::len(self);

@@ -3,28 +3,28 @@ use core::{fmt, ptr, slice};
 
 use crate::private::Sealed;
 use crate::slot::Slot;
-use crate::uninit::Uninit;
+use crate::out::Out;
 
-/// Trait for unifying behavior over slices and fixed-size arrays].
+/// Trait for unifying behavior over slices and fixed-size arrays.
 pub trait SliceLike: Sealed {
     type Elem;
 
-    fn len(slot: &Uninit<'_, Self>) -> usize;
-    fn ptr(slot: &Uninit<'_, Self>) -> *const Self::Elem;
-    fn ptr_mut(slot: &mut Uninit<'_, Self>) -> *mut Self::Elem;
+    fn len(slot: &Out<'_, Self>) -> usize;
+    fn ptr(slot: &Out<'_, Self>) -> *const Self::Elem;
+    fn ptr_mut(slot: &mut Out<'_, Self>) -> *mut Self::Elem;
 }
 
 /// An owning handle to a partially initialized slice.
 // TODO: document methods and safety invariants
 // TODO: improve API
 pub struct SliceSlot<'s, S: SliceLike> {
-    slot: Uninit<'s, S>,
+    slot: Out<'s, S>,
     filled: usize,
 }
 
 impl<'s, S: SliceLike> SliceSlot<'s, S> {
     #[inline]
-    pub fn new(slot: Uninit<'s, S>) -> Self {
+    pub fn new(slot: Out<'s, S>) -> Self {
         Self { slot, filled: 0 }
     }
 
@@ -110,7 +110,7 @@ impl<'s, S: SliceLike> SliceSlot<'s, S> {
 
     pub fn init_next<'a, F>(&'a mut self, init: F) -> Result<&[S::Elem], ()>
     where
-        F: for<'t> FnOnce(&'a mut [S::Elem], Uninit<'t, S::Elem>) -> Slot<'t, S::Elem>,
+        F: for<'t> FnOnce(&'a mut [S::Elem], Out<'t, S::Elem>) -> Slot<'t, S::Elem>,
     {
         if self.is_full() {
             return Err(());
@@ -123,7 +123,7 @@ impl<'s, S: SliceLike> SliceSlot<'s, S> {
             let filled = slice::from_raw_parts_mut(ptr, *filled_len);
             let next = ptr.add(*filled_len);
             crate::scope::enter(|scope| {
-                let uninit = Uninit::new_unchecked(next, scope);
+                let uninit = Out::new_unchecked(next, scope);
                 let _slot = init(filled, uninit);
             });
             *filled_len += 1;
@@ -143,7 +143,7 @@ impl<'s, S: SliceLike> SliceSlot<'s, S> {
 
     pub fn init_remaining<F>(mut self, mut init: F) -> Slot<'s, S>
     where
-        F: for<'t> FnMut(Uninit<'t, S::Elem>) -> Slot<'t, S::Elem>,
+        F: for<'t> FnMut(Out<'t, S::Elem>) -> Slot<'t, S::Elem>,
     {
         while self.init_next(|_, slot| init(slot)).is_ok() {
             // do nothing
@@ -167,9 +167,9 @@ impl<'s, S: SliceLike> Drop for SliceSlot<'s, S> {
     }
 }
 
-impl<'s, S: SliceLike> From<Uninit<'s, S>> for SliceSlot<'s, S> {
+impl<'s, S: SliceLike> From<Out<'s, S>> for SliceSlot<'s, S> {
     #[inline]
-    fn from(slot: Uninit<'s, S>) -> Self {
+    fn from(slot: Out<'s, S>) -> Self {
         Self::new(slot)
     }
 }
@@ -178,15 +178,15 @@ impl<T> Sealed for [T] {}
 impl<T> SliceLike for [T] {
     type Elem = T;
 
-    fn len(slot: &Uninit<'_, Self>) -> usize {
+    fn len(slot: &Out<'_, Self>) -> usize {
         unsafe { crate::private::raw_slice_len_polyfill(slot.as_ptr()) }
     }
 
-    fn ptr(slot: &Uninit<'_, Self>) -> *const Self::Elem {
+    fn ptr(slot: &Out<'_, Self>) -> *const Self::Elem {
         slot.as_ptr() as *const _
     }
 
-    fn ptr_mut(slot: &mut Uninit<'_, Self>) -> *mut Self::Elem {
+    fn ptr_mut(slot: &mut Out<'_, Self>) -> *mut Self::Elem {
         slot.as_mut_ptr() as *mut _
     }
 }
@@ -195,15 +195,15 @@ impl<T, const N: usize> Sealed for [T; N] {}
 impl<T, const N: usize> SliceLike for [T; N] {
     type Elem = T;
 
-    fn len(_slot: &Uninit<'_, Self>) -> usize {
+    fn len(_slot: &Out<'_, Self>) -> usize {
         N
     }
 
-    fn ptr(slot: &Uninit<'_, Self>) -> *const Self::Elem {
+    fn ptr(slot: &Out<'_, Self>) -> *const Self::Elem {
         slot.as_ptr() as *const _
     }
 
-    fn ptr_mut(slot: &mut Uninit<'_, Self>) -> *mut Self::Elem {
+    fn ptr_mut(slot: &mut Out<'_, Self>) -> *mut Self::Elem {
         slot.as_mut_ptr() as *mut _
     }
 }

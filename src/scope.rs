@@ -6,7 +6,7 @@ type Invariant<T> = PhantomData<Cell<T>>;
 
 /// A scope with an invariant lifetime.
 ///
-/// Useful for constructing [`Uninit`][crate::Uninit] and [`Slot`][crate::Slot] instances.
+/// Useful for constructing [`Out`][crate::Out] and [`Slot`][crate::Slot] instances.
 pub struct Scope<'s>(Invariant<&'s ()>);
 
 /// Enters a new scope with a fresh lifetime.

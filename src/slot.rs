@@ -3,7 +3,7 @@ use core::ops::{Deref, DerefMut};
 use core::ptr::{self, NonNull};
 
 use crate::scope::{Scope, ScopedPtr};
-use crate::uninit::Uninit;
+use crate::out::Out;
 
 /// An owning handle to a `T` tied to a scope `'s`.
 // TODO: impl all useful traits
@@ -38,8 +38,8 @@ impl<'s, T: ?Sized> Slot<'s, T> {
     }
 
     #[inline]
-    pub fn drop(this: Self) -> Uninit<'s, T> {
-        unsafe { Uninit::from_raw(this.0) }
+    pub fn drop(this: Self) -> Out<'s, T> {
+        unsafe { Out::from_raw(this.0) }
         // implicit drop of this, and thus of contained T
     }
 
@@ -53,9 +53,9 @@ impl<'s, T: ?Sized> Slot<'s, T> {
     }
 
     #[inline]
-    pub fn forget(this: Self) -> Uninit<'s, T> {
+    pub fn forget(this: Self) -> Out<'s, T> {
         let this = ManuallyDrop::new(this);
-        unsafe { Uninit::from_raw(this.0) }
+        unsafe { Out::from_raw(this.0) }
     }
 }
 

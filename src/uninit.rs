@@ -41,7 +41,15 @@ impl<'s, T: ?Sized> Uninit<'s, T> {
 
 impl<'s, T> Uninit<'s, T> {
     #[inline]
-    pub fn as_uninit(&mut self) -> &mut MaybeUninit<T>
+    pub fn as_uninit(&self) -> &MaybeUninit<T>
+    where
+        T: Sized,
+    {
+        unsafe { self.0.cast::<MaybeUninit<T>>().as_ref() }
+    }
+
+    #[inline]
+    pub fn as_uninit_mut(&mut self) -> &mut MaybeUninit<T>
     where
         T: Sized,
     {
@@ -63,14 +71,13 @@ impl<'s, T> Uninit<'s, T> {
 impl<'s, T> Uninit<'s, [T]> {
     #[inline]
     pub fn as_uninit_slice(&mut self) -> &mut [MaybeUninit<T>] {
-        unsafe {
-            // TODO: use NonNull::as_uninit_slice_mut once stable.
-            let ptr: *mut [T] = self.0.as_ptr();
-            let len = {
-                let zst_slice: &[()] = &*(ptr as *const _);
-                zst_slice.len()
-            };
-            slice::from_raw_parts_mut(ptr as *mut _, len)
-        }
+        let len = <[T] as crate::SliceLike>::len(self);
+        unsafe { slice::from_raw_parts_mut(self.as_mut_ptr() as *mut _, len) }
+    }
+
+    #[inline]
+    pub fn as_uninit_slice_mut(&mut self) -> &mut [MaybeUninit<T>] {
+        let len = <[T] as crate::SliceLike>::len(self);
+        unsafe { slice::from_raw_parts_mut(self.as_mut_ptr() as *mut _, len) }
     }
 }

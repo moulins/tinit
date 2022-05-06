@@ -1,6 +1,7 @@
 use core::mem::{ManuallyDrop, MaybeUninit};
 use core::{fmt, ptr, slice};
 
+use crate::Token;
 use crate::private::Sealed;
 use crate::slot::Slot;
 use crate::out::Out;
@@ -17,12 +18,12 @@ pub trait SliceLike: Sealed {
 /// An owning handle to a partially initialized slice.
 // TODO: document methods and safety invariants
 // TODO: improve API
-pub struct SliceSlot<'s, S: SliceLike> {
+pub struct SliceSlot<'s, S: SliceLike + ?Sized> {
     slot: Out<'s, S>,
     filled: usize,
 }
 
-impl<'s, S: SliceLike> SliceSlot<'s, S> {
+impl<'s, S: SliceLike + ?Sized> SliceSlot<'s, S> {
     #[inline]
     pub fn new(slot: Out<'s, S>) -> Self {
         Self { slot, filled: 0 }
@@ -105,12 +106,12 @@ impl<'s, S: SliceLike> SliceSlot<'s, S> {
     where
         F: FnOnce(&mut [S::Elem]) -> S::Elem,
     {
-        self.init_next(|filled, slot| slot.fill(f(filled)))
+        self.init_next(|filled, slot| slot.fill(f(filled)).into())
     }
 
     pub fn init_next<'a, F>(&'a mut self, init: F) -> Result<&[S::Elem], ()>
     where
-        F: for<'t> FnOnce(&'a mut [S::Elem], Out<'t, S::Elem>) -> Slot<'t, S::Elem>,
+        F: for<'t> FnOnce(&'a mut [S::Elem], Out<'t, S::Elem>) -> Token<'t>,
     {
         if self.is_full() {
             return Err(());
@@ -122,9 +123,9 @@ impl<'s, S: SliceLike> SliceSlot<'s, S> {
         unsafe {
             let filled = slice::from_raw_parts_mut(ptr, *filled_len);
             let next = ptr.add(*filled_len);
-            crate::scope::enter(|scope| {
-                let uninit = Out::new_unchecked(next, scope);
-                let _slot = init(filled, uninit);
+            crate::token::scope(|scope| {
+                let uninit = Out::forge(scope, next);
+                let _token = init(filled, uninit);
             });
             *filled_len += 1;
         }
@@ -143,7 +144,7 @@ impl<'s, S: SliceLike> SliceSlot<'s, S> {
 
     pub fn init_remaining<F>(mut self, mut init: F) -> Slot<'s, S>
     where
-        F: for<'t> FnMut(Out<'t, S::Elem>) -> Slot<'t, S::Elem>,
+        F: for<'t> FnMut(Out<'t, S::Elem>) -> Token<'t>,
     {
         while self.init_next(|_, slot| init(slot)).is_ok() {
             // do nothing
@@ -152,7 +153,7 @@ impl<'s, S: SliceLike> SliceSlot<'s, S> {
     }
 }
 
-impl<'s, S: SliceLike> fmt::Debug for SliceSlot<'s, S> {
+impl<'s, S: SliceLike + ?Sized> fmt::Debug for SliceSlot<'s, S> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("SliceSlot")
             .field("len", &SliceLike::len(&self.slot))
@@ -161,13 +162,13 @@ impl<'s, S: SliceLike> fmt::Debug for SliceSlot<'s, S> {
     }
 }
 
-impl<'s, S: SliceLike> Drop for SliceSlot<'s, S> {
+impl<'s, S: SliceLike + ?Sized> Drop for SliceSlot<'s, S> {
     fn drop(&mut self) {
         unsafe { ptr::drop_in_place(self.filled_mut()) }
     }
 }
 
-impl<'s, S: SliceLike> From<Out<'s, S>> for SliceSlot<'s, S> {
+impl<'s, S: SliceLike + ?Sized> From<Out<'s, S>> for SliceSlot<'s, S> {
     #[inline]
     fn from(slot: Out<'s, S>) -> Self {
         Self::new(slot)

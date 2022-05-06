@@ -1,27 +1,29 @@
 #![warn(unsafe_op_in_unsafe_fn)]
 
+mod impls;
+mod out;
 mod private;
 mod slice;
 mod slot;
-mod out;
 
-pub mod scope;
+pub mod token;
 
+pub use out::Out;
 pub use slice::{SliceLike, SliceSlot};
 pub use slot::Slot;
-pub use out::Out;
+pub use token::{Token, Tokens};
 
 pub fn box_init<T, F>(init: F) -> Box<T>
 where
-    F: for<'s> FnOnce(Out<'s, T>) -> Slot<'s, T>,
+    F: for<'s> FnOnce(Out<'s, T>) -> Token<'s>,
 {
     unsafe {
         let boxed = private::box_new_uninit_polyfill::<T>();
         let raw = Box::into_raw(boxed) as *mut T;
 
-        scope::enter(|scope| {
-            let slot = Out::new_unchecked(raw, scope);
-            let _own = init(slot);
+        token::scope(|scope| {
+            let slot = Out::forge(scope, raw);
+            let _token = init(slot);
         });
 
        Box::from_raw(raw)
@@ -34,11 +36,11 @@ mod tests {
 
     #[test]
     fn it_works() {
-        let b: Box<i32> = box_init(|slot: Out<'_, i32>| -> Slot<'_, i32> {
-            let filled: Slot<'_, i32> = slot.fill(50);
+        let b: Box<i32> = box_init(|slot| {
+            let filled = slot.fill(50);
             let val = *filled;
-            let slot: Out<'_, i32> = Slot::drop(filled);
-            slot.fill(val * 2)
+            let slot = Slot::drop(filled);
+            slot.fill(val * 2).into()
         });
 
         assert_eq!(*b, 100);
@@ -46,7 +48,7 @@ mod tests {
 
     #[test]
     fn fibonacci() {
-        let numbers: Box<[f64; 10_000_000]> = box_init(|slot| {
+        let numbers: Box<[f64; 1_500]> = box_init(|slot| {
             let mut slice = SliceSlot::new(slot);
             loop {
                 let done = slice.fill_next(|filled| match filled {
@@ -54,7 +56,7 @@ mod tests {
                     _ => 1.0,
                 });
                 if done.is_err() {
-                    return slice.finish().unwrap();
+                    return Into::into(slice.finish().unwrap());
                 }
             }
         });

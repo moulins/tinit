@@ -1,42 +1,49 @@
 use core::mem::MaybeUninit;
 use core::ptr::{self, NonNull};
 use core::slice;
+use std::marker::PhantomData;
 
-use crate::scope::{Scope, ScopedPtr};
+use crate::token::{Scope, Token};
 use crate::slot::Slot;
 
 /// An owning handle to an uninitialized `T` tied to a scope `'s`.
 ///
 /// Morally equivalent to [`Slot<'s, MaybeUninit<T>>`][Slot], but supports dynamically sized types.
 // TODO: document methods and safety invariant.
-// Note that this could be contravariant in T, but this isn't possible.
-pub struct Out<'s, T: ?Sized>(ScopedPtr<'s, T>);
+pub struct Out<'s, T: ?Sized> {
+    ptr: NonNull<T>,
+    token: Token<'s>,
+    _invariant: PhantomData<*mut T>,
+}
 
 impl<'s, T: ?Sized> Out<'s, T> {
     #[inline]
-    pub(crate) unsafe fn from_raw(raw: ScopedPtr<'s, T>) -> Self {
-        Self(raw)
+    pub(crate) unsafe fn from_raw(ptr: *mut T, token: Token<'s>) -> Self {
+        Self {
+            ptr: unsafe { NonNull::new_unchecked(ptr) },
+            token,
+            _invariant: PhantomData,
+        }
     }
 
     #[inline]
-    pub unsafe fn new_unchecked(ptr: *mut T, scope: Scope<'s>) -> Self {
-        let ptr = unsafe { NonNull::new_unchecked(ptr) };
-        Self(scope.with_ptr(ptr))
+    pub unsafe fn forge(scope: Scope<'s>, ptr: *mut T) -> Self {
+        unsafe { Self::from_raw(ptr, Token::new(scope)) }
     }
 
     #[inline]
     pub fn as_ptr(&self) -> *const T {
-        self.0.as_ptr()
+        self.ptr.as_ptr()
     }
 
     #[inline]
     pub fn as_mut_ptr(&mut self) -> *mut T {
-        self.0.as_ptr()
+        self.ptr.as_ptr()
     }
 
     #[inline]
     pub unsafe fn assume_init(self) -> Slot<'s, T> {
-        unsafe { Slot::from_raw(self.0) }
+        unsafe { Slot::from_raw(self.ptr.as_ptr(), self.token) }
     }
 }
 
@@ -46,7 +53,7 @@ impl<'s, T> Out<'s, T> {
     where
         T: Sized,
     {
-        unsafe { self.0.cast::<MaybeUninit<T>>().as_ref() }
+        unsafe { self.ptr.cast::<MaybeUninit<T>>().as_ref() }
     }
 
     #[inline]
@@ -54,7 +61,7 @@ impl<'s, T> Out<'s, T> {
     where
         T: Sized,
     {
-        unsafe { self.0.cast::<MaybeUninit<T>>().as_mut() }
+        unsafe { self.ptr.cast::<MaybeUninit<T>>().as_mut() }
     }
 
     #[inline]

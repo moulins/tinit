@@ -89,7 +89,7 @@ impl<'s, S: SliceLike> SliceSlot<'s, S> {
     #[inline]
     pub unsafe fn assume_init(self) -> Slot<'s, S> {
         let this = ManuallyDrop::new(self);
-        ptr::read(&this.slot).assume_init()
+        unsafe { ptr::read(&this.slot).assume_init() }
     }
 
     #[inline]

@@ -4,9 +4,11 @@ use core::mem::MaybeUninit;
 pub trait Sealed {}
 
 // TODO: remove once raw slice's len method stabilizes.
+// SAFETY: ptr must point to allocated memory.
 #[inline]
 pub unsafe fn raw_slice_len_polyfill<T>(ptr: *const [T]) -> usize {
-    let zst_slice: &[()] = &*(ptr as *const _);
+    // SAFETY: a [()] is always zero bytes, so making a reference is safe.
+    let zst_slice: &[()] = unsafe { &*(ptr as *const _) };
     zst_slice.len()
 }
 

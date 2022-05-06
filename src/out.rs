@@ -20,7 +20,8 @@ impl<'s, T: ?Sized> Out<'s, T> {
 
     #[inline]
     pub unsafe fn new_unchecked(ptr: *mut T, scope: Scope<'s>) -> Self {
-        Self(scope.with_ptr(NonNull::new_unchecked(ptr)))
+        let ptr = unsafe { NonNull::new_unchecked(ptr) };
+        Self(scope.with_ptr(ptr))
     }
 
     #[inline]
@@ -35,7 +36,7 @@ impl<'s, T: ?Sized> Out<'s, T> {
 
     #[inline]
     pub unsafe fn assume_init(self) -> Slot<'s, T> {
-        Slot::from_raw(self.0)
+        unsafe { Slot::from_raw(self.0) }
     }
 }
 

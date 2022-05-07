@@ -4,3 +4,9 @@ version = "0.0.1"
 edition = "2021"
 
 [dependencies]
+
+[features]
+enable_second_test = []
+
+[profile.release]
+opt-level = 3

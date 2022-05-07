@@ -19,8 +19,8 @@ pub trait SliceLike: Sealed {
 // TODO: document methods and safety invariants
 // TODO: improve API
 pub struct SliceSlot<'s, S: SliceLike + ?Sized> {
-    slot: Out<'s, S>,
-    filled: usize,
+    pub slot: Out<'s, S>,
+    pub filled: usize,
 }
 
 impl<'s, S: SliceLike + ?Sized> SliceSlot<'s, S> {

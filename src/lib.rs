@@ -21,7 +21,8 @@ where
 
         scope::enter(|scope| {
             let slot = Out::new_unchecked(raw, scope);
-            let _own = init(slot);
+            let slot = init(slot);
+            Slot::leak(slot);
         });
 
        Box::from_raw(raw)
@@ -46,7 +47,7 @@ mod tests {
 
     #[test]
     fn fibonacci() {
-        let numbers: Box<[f64; 10_000_000]> = box_init(|slot| {
+        let numbers: Box<[f64; 10_000]> = box_init(|slot| {
             let mut slice = SliceSlot::new(slot);
             loop {
                 let done = slice.fill_next(|filled| match filled {

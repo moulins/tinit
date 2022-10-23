@@ -29,7 +29,7 @@ impl<'s> Scope<'s> {
 // TODO: should this type be exposed in the public API?
 pub(crate) struct ScopedPtr<'s, T: ?Sized> {
     ptr: NonNull<T>,
-    _marker: Invariant<(&'s (), T)>,
+    _marker: Invariant<&'s T>,
 }
 
 impl<'s, T: ?Sized> std::ops::Deref for ScopedPtr<'s, T> {

@@ -68,7 +68,7 @@ mod tests {
 
     #[test]
     fn it_works() {
-        let b: Box<i32> = emplace_box().with(|out: Out<'_, i32>| -> Loan<'_, i32> {
+        let b: Box<i32> = emplace!(emplace_box() => out {
             let filled: Loan<'_, i32> = out.set(50);
             let val = *filled;
             let out: Out<'_, i32> = Loan::drop(filled);
@@ -77,10 +77,10 @@ mod tests {
 
         assert_eq!(*b, 100);
     }
-    
+
     #[test]
     fn fibonacci() {
-        let numbers: Box<[u64; 64]> = emplace_box().with(|out| {
+        let numbers: Box<[u64; 64]> = emplace!(emplace_box() => out {
             let mut slice = Slice::new(out);
 
             while !slice.is_full() {

@@ -1,12 +1,16 @@
+use core::marker::PhantomData;
+
 use crate::mem::Lease;
-use crate::Loan;
+use crate::{Loan, Out, Place};
+
+#[doc(hidden)]
 
 #[doc(hidden)]
 pub struct LeaseGuard<'s>(Lease<'s>);
 
 impl<'s> LeaseGuard<'s> {
     #[inline(always)]
-    pub unsafe fn forge_lease<'env>() -> Lease<'s> {
+    pub unsafe fn forge_lease() -> Lease<'s> {
         unsafe { Lease::forge() }
     }
 
@@ -29,19 +33,39 @@ macro_rules! make_lease {
     };
 }
 
-#[inline(always)]
-pub fn forget_leased_loan<'s, T>(_lease: &Lease<'s>, loan: Loan<'s, T>) {
-    core::mem::forget(loan)
+
+pub struct EmplaceGuard<'s, T, P> {
+    lease: &'s Lease<'s>,
+    _invariant: PhantomData<core::cell::Cell<(P, T)>>,
+}
+
+impl<'s, T, P: Place<Type=T>> EmplaceGuard<'s, T, P> {
+    #[inline(always)]
+    pub fn for_place(lease: &'s Lease<'s>, _: &P) -> Self {
+        Self { lease, _invariant: PhantomData }
+    }
+
+    #[inline(always)]
+    pub fn borrow(&self, place: &'s mut P) -> Out<'s, T> {
+        self.lease.borrow(place)
+    }
+
+    #[inline(always)]
+    pub fn forget_loan(self, loan: Loan<'s, T>) {
+        core::mem::forget(loan)
+    }
 }
 
 #[macro_export]
 macro_rules! emplace {
     ($place:expr => $out:ident $block:block) => {{
-        $crate::make_lease!(lease);
         let mut place = $place;
-        let ptr = $crate::place::Place::as_mut_ptr(&mut place);
-        let $out: $crate::Out<'_, _> = unsafe { lease.borrow_ptr(ptr) };
-        $crate::__::forget_leased_loan(&lease, $block);
+        {
+            $crate::make_lease!(lease);
+            let guard = $crate::__::EmplaceGuard::for_place(&lease, &place);
+            let $out = guard.borrow(&mut place);
+            guard.forget_loan($block);
+        }
         unsafe { $crate::place::Place::assume_init(place) }
     }};
 }

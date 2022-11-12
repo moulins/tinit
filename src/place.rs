@@ -25,15 +25,10 @@ pub unsafe trait Place: Sized {
 
     #[inline(always)]
     fn with(
-        mut self,
+        self,
         init: impl for<'s> FnOnce(Out<'s, Self::Type>) -> Loan<'s, Self::Type>,
     ) -> Self::Init {
-        {
-            make_lease!(lease);
-            let out = lease.borrow(&mut self);
-            core::mem::forget(init(out));
-        }
-        unsafe { self.assume_init() }
+        emplace!(self => out { init(out) })
     }
 
     #[inline(always)]

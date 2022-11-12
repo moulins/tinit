@@ -1,9 +1,9 @@
 use core::marker::PhantomData;
 
 use crate::mem::Lease;
-use crate::{Loan, Out, Place};
+use crate::{Loan, Place};
 
-#[doc(hidden)]
+type Invariant<T> = PhantomData<core::cell::Cell<T>>;
 
 #[doc(hidden)]
 pub struct LeaseGuard<'s>(Lease<'s>);
@@ -33,25 +33,16 @@ macro_rules! make_lease {
     };
 }
 
+pub struct TypeMarker<T: ?Sized>(Invariant<T>);
 
-pub struct EmplaceGuard<'s, T, P> {
-    lease: &'s Lease<'s>,
-    _invariant: PhantomData<core::cell::Cell<(P, T)>>,
-}
-
-impl<'s, T, P: Place<Type=T>> EmplaceGuard<'s, T, P> {
+impl<T: ?Sized> TypeMarker<T> {
     #[inline(always)]
-    pub fn for_place(lease: &'s Lease<'s>, _: &P) -> Self {
-        Self { lease, _invariant: PhantomData }
+    pub fn assert_place<P: Place<Type=T>>(place: P) -> (P, Self) {
+        (place, Self(PhantomData))
     }
 
     #[inline(always)]
-    pub fn borrow(&self, place: &'s mut P) -> Out<'s, T> {
-        self.lease.borrow(place)
-    }
-
-    #[inline(always)]
-    pub fn forget_loan(self, loan: Loan<'s, T>) {
+    pub fn forget_loan<'s>(&self, _: &'s Lease<'s>, loan: Loan<'s, T>) {
         core::mem::forget(loan)
     }
 }
@@ -59,13 +50,16 @@ impl<'s, T, P: Place<Type=T>> EmplaceGuard<'s, T, P> {
 #[macro_export]
 macro_rules! emplace {
     ($place:expr => $out:ident $block:block) => {{
-        let mut place = $place;
+        let (mut $out, _place_type) = $crate::__::TypeMarker::assert_place($place);
         {
             $crate::make_lease!(lease);
-            let guard = $crate::__::EmplaceGuard::for_place(&lease, &place);
-            let $out = guard.borrow(&mut place);
-            guard.forget_loan($block);
+            let $out = lease.borrow(&mut $out);
+            let _loan = $block;
+            // Unfortunately, this suppresses warnings on all unreachable code in the rest
+            // of the function, not just for this line.
+            #[allow(unreachable_code)]
+            { _place_type.forget_loan(&lease, _loan) }
         }
-        unsafe { $crate::place::Place::assume_init(place) }
+        unsafe { $crate::place::Place::assume_init($out) }
     }};
 }

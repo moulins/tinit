@@ -1,14 +1,6 @@
 use alloc::boxed::Box;
 use core::mem::MaybeUninit;
 
-// SAFETY: `ptr` must point to allocated memory.
-#[inline(always)]
-pub unsafe fn raw_slice_len<T>(ptr: *const [T]) -> usize {
-    // SAFETY: a [()] is always zero bytes, so making a reference is safe.
-    let zst_slice: &[()] = unsafe { &*(ptr as *const _) };
-    zst_slice.len()
-}
-
 #[inline]
 pub fn box_new_uninit<T>() -> Box<MaybeUninit<T>> {
     unsafe {

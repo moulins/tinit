@@ -18,7 +18,7 @@ mod polyfill;
 pub mod slice;
 
 pub use init::Init;
-pub use place::Place;
+pub use place::{IntoPlace, Place};
 
 pub type Slot<'s, T> = &'s mut MaybeUninit<T>;
 pub type Uninit<'s, T> = mem::OwnedMem<'s, T>;
@@ -29,7 +29,7 @@ pub type Loan<'s, T> = Init<mem::LeasedMem<'s, T>>;
 // TODO: constify everything that can be constified.
 
 #[inline(always)]
-pub fn emplace_box<T>() -> impl Place<Type = T, Init = Box<T>> {
+pub fn emplace_box<T>() -> impl IntoPlace<Type = T, Init = Box<T>> {
     struct BoxPlace<T>(Box<MaybeUninit<T>>);
 
     unsafe impl<T> Place for BoxPlace<T> {
@@ -53,7 +53,7 @@ pub fn emplace_box<T>() -> impl Place<Type = T, Init = Box<T>> {
         }
     }
 
-    BoxPlace(polyfill::box_new_uninit())
+    place::PlaceFn(|| BoxPlace(polyfill::box_new_uninit()))
 }
 
 #[inline(always)]
@@ -85,16 +85,16 @@ mod tests {
 
             while !slice.is_full() {
                 let v = match &*slice {
-                    [.., a, b] => *a + *b,
+                    [a, b, ..] => *a + *b,
                     _ => 1,
                 };
-                slice.push(v);
+                slice.emplace_at(0).set(v);
             }
 
             slice.assert_full()
         });
 
-        assert_eq!(numbers.last(), Some(&10610209857723));
+        assert_eq!(numbers.first(), Some(&10610209857723));
     }
 
     #[test]

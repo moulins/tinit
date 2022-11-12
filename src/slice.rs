@@ -3,7 +3,7 @@ use core::ops::{Deref, DerefMut};
 use core::{ptr, slice};
 
 use crate::init::Init;
-use crate::place::{Place, SlicePlace};
+use crate::place::{IntoPlace, Place, SlicePlace};
 
 // TODO: document
 // TODO: implement the full Vec API.
@@ -52,11 +52,24 @@ where
     }
 
     #[inline]
-    pub fn emplace(&mut self) -> SliceElemPlace<'_, P> {
-        if self.is_full() {
-            panic_slice_full(self.len())
+    pub fn emplace(&mut self) -> SliceEmplace<'_, P> {
+        let pos = self.len();
+        if pos >= self.place.len() {
+            panic_slice_full(pos)
         } else {
-            SliceElemPlace(self)
+            SliceEmplace { slice: self, pos }
+        }
+    }
+
+    #[inline]
+    pub fn emplace_at(&mut self, pos: usize) -> SliceEmplace<'_, P> {
+        let len = self.len();
+        if len >= self.place.len() {
+            panic_slice_full(len)
+        } else if pos > len {
+            panic!("index out of bounds");
+        } else {
+            SliceEmplace { slice: self, pos }
         }
     }
 
@@ -72,6 +85,8 @@ where
             Some(val)
         }
     }
+
+    // TODO: a variant of 'pop' that returns an Option<Own<'_, T>>
 
     #[inline(always)]
     pub fn clear(&mut self) {
@@ -128,7 +143,8 @@ impl<P: SlicePlace> Deref for Slice<P> {
 impl<P: SlicePlace> DerefMut for Slice<P> {
     #[inline(always)]
     fn deref_mut(&mut self) -> &mut Self::Target {
-        unsafe { slice::from_raw_parts_mut(self.as_mut_ptr(), self.len()) }
+        let (len, ptr) = (self.len(), self.as_mut_ptr());
+        unsafe { slice::from_raw_parts_mut(ptr, len) }
     }
 }
 
@@ -148,56 +164,91 @@ fn panic_slice_full(len: usize) -> ! {
 #[cold]
 #[inline(never)]
 fn panic_slice_not_full(len: usize, cap: usize) -> ! {
-    panic!("slice isn't full(len: {len}, capacity: {cap})")
+    panic!("slice isn't full (len: {len}, capacity: {cap})")
 }
 
-pub struct SliceElemPlace<'a, P: SlicePlace>(&'a mut Slice<P>);
+pub struct SliceEmplace<'a, P: SlicePlace> {
+    slice: &'a mut Slice<P>,
+    pos: usize,
+}
 
-impl<'a, T, P> SliceElemPlace<'a, P>
+impl<'a, T, P> IntoPlace for SliceEmplace<'a, P>
+where
+    P: SlicePlace<Elem = T>,
+{
+    type Type = T;
+
+    type Place = SliceElem<'a, T>;
+
+    type Init = ();
+
+    #[inline]
+    unsafe fn into_place(self) -> Self::Place {
+        let elem = unsafe { self.slice.as_mut_ptr().add(self.pos) };
+        let len = &mut self.slice.len;
+        let shift = *len - self.pos;
+        unsafe { core::ptr::copy(elem, elem.add(1), shift) }
+        SliceElem { elem, shift, len }
+    }
+}
+
+impl<'a, T, P> SliceEmplace<'a, P>
 where
     P: SlicePlace<Elem = T>,
 {
     #[inline(always)]
     pub fn filled(&self) -> &[T] {
-        self.0
+        self.slice
     }
 
     #[inline(always)]
     pub fn filled_mut(&mut self) -> &mut [T] {
-        self.0
+        self.slice
     }
 
     #[inline(always)]
     pub fn pos(&self) -> usize {
-        self.0.len()
-    }
-
-    #[inline(always)]
-    pub fn split(self) -> (&'a mut [T], impl Place<Type = T, Init = ()> + 'a) {
-        let filled = unsafe { slice::from_raw_parts_mut(self.0.as_mut_ptr(), self.0.len()) };
-        (filled, self)
+        self.pos
     }
 }
 
-unsafe impl<'a, P: SlicePlace> Place for SliceElemPlace<'a, P> {
-    type Type = P::Elem;
+use private::SliceElem;
+mod private {
+    use super::*;
 
-    type Init = ();
-
-    #[inline(always)]
-    fn as_ptr(&self) -> *const Self::Type {
-        let ptr = self.0.place.as_ptr() as *const Self::Type;
-        unsafe { ptr.add(self.0.len) }
+    pub struct SliceElem<'a, T> {
+        pub(super) elem: *mut T,
+        pub(super) shift: usize,
+        pub(super) len: &'a mut usize,
     }
 
-    #[inline(always)]
-    fn as_mut_ptr(&mut self) -> *mut Self::Type {
-        let ptr = self.0.place.as_mut_ptr() as *mut Self::Type;
-        unsafe { ptr.add(self.0.len) }
+    unsafe impl<'a, T> Place for SliceElem<'a, T> {
+        type Type = T;
+        type Init = ();
+
+        #[inline(always)]
+        fn as_ptr(&self) -> *const Self::Type {
+            self.elem
+        }
+
+        #[inline(always)]
+        fn as_mut_ptr(&mut self) -> *mut Self::Type {
+            self.elem
+        }
+
+        #[inline(always)]
+        unsafe fn assume_init(self) -> Self::Init {
+            *self.len += 1;
+            core::mem::forget(self);
+        }
     }
 
-    #[inline(always)]
-    unsafe fn assume_init(self) -> Self::Init {
-        self.0.len += 1;
+    impl<'a, T> Drop for SliceElem<'a, T> {
+        #[inline(always)]
+        fn drop(&mut self) {
+            unsafe {
+                core::ptr::copy(self.elem.add(1), self.elem, self.shift);
+            }
+        }
     }
 }

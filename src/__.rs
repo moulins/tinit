@@ -1,7 +1,7 @@
 use core::marker::PhantomData;
 
 use crate::mem::Lease;
-use crate::{Loan, Place};
+use crate::{IntoPlace, Loan};
 
 type Invariant<T> = PhantomData<core::cell::Cell<T>>;
 
@@ -37,8 +37,8 @@ pub struct TypeMarker<T: ?Sized>(Invariant<T>);
 
 impl<T: ?Sized> TypeMarker<T> {
     #[inline(always)]
-    pub fn assert_place<P: Place<Type=T>>(place: P) -> (P, Self) {
-        (place, Self(PhantomData))
+    pub unsafe fn into_place<P: IntoPlace<Type = T>>(place: P) -> (P::Place, Self) {
+        (unsafe { place.into_place() }, Self(PhantomData))
     }
 
     #[inline(always)]
@@ -50,7 +50,14 @@ impl<T: ?Sized> TypeMarker<T> {
 #[macro_export]
 macro_rules! emplace {
     ($place:expr => $out:ident $block:block) => {{
-        let (mut $out, _place_type) = $crate::__::TypeMarker::assert_place($place);
+        let $out = $place;
+        // SAFETY:
+        // We make sure the place is never leaked or forgotten:
+        //  - if `$block` diverges, it gets dropped;
+        //  - otherwise, we it gets initialized;
+        //  - this stays true if we're in a `async` block, as the block must be pinned
+        //    to be executed, and `Pin` guarantees that the frame will be dropped.
+        let (mut $out, _type) = unsafe { $crate::__::TypeMarker::into_place($out) };
         {
             $crate::make_lease!(lease);
             let $out = lease.borrow(&mut $out);
@@ -58,7 +65,9 @@ macro_rules! emplace {
             // Unfortunately, this suppresses warnings on all unreachable code in the rest
             // of the function, not just for this line.
             #[allow(unreachable_code)]
-            { _place_type.forget_loan(&lease, _loan) }
+            {
+                _type.forget_loan(&lease, _loan)
+            }
         }
         unsafe { $crate::place::Place::assume_init($out) }
     }};

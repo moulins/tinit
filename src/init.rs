@@ -2,7 +2,7 @@ use core::mem::ManuallyDrop;
 use core::ops::{Deref, DerefMut};
 use core::ptr;
 
-use crate::place::Place;
+use crate::place::{IntoPlace, Place};
 use crate::Slot;
 use crate::Uninit;
 
@@ -89,11 +89,18 @@ where
         // SAFETY: `place` contains a valid `T`, and the lifetime is properly constrained.
         unsafe { &mut *place.as_mut_ptr() }
     }
+
+    #[inline(always)]
+    pub fn finalize(this: Self) -> P::Init {
+        // SAFETY: `place` contains a valid T
+        unsafe { Self::forget(this).assume_init() }
+    }
 }
 
 impl<P: Place> Drop for Init<P> {
     #[inline]
     fn drop(&mut self) {
+        // SAFETY: `place` contains a valid T, and is never accessed after this line.
         unsafe { ptr::drop_in_place(self.0.as_mut_ptr()) }
     }
 }

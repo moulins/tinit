@@ -1,35 +1,35 @@
 use core::marker::PhantomData;
 
-use crate::mem::Lease;
-use crate::{IntoPlace, Loan};
+use crate::mem::Scope;
+use crate::{Init, IntoPlace, ScopedMem};
 
 type Invariant<T> = PhantomData<core::cell::Cell<T>>;
 
 #[doc(hidden)]
-pub struct LeaseGuard<'s>(Lease<'s>);
+pub struct ScopeGuard<'s>(Scope<'s>);
 
-impl<'s> LeaseGuard<'s> {
+impl<'s> ScopeGuard<'s> {
     #[inline(always)]
-    pub unsafe fn forge_lease() -> Lease<'s> {
-        unsafe { Lease::forge() }
+    pub unsafe fn forge_scope() -> Scope<'s> {
+        unsafe { Scope::forge() }
     }
 
     #[inline(always)]
-    pub fn new(_: &'s Lease<'s>) -> Self {
-        unsafe { LeaseGuard(Lease::forge()) }
+    pub fn new(_: &'s Scope<'s>) -> Self {
+        unsafe { ScopeGuard(Scope::forge()) }
     }
 }
 
-impl<'s> Drop for LeaseGuard<'s> {
+impl<'s> Drop for ScopeGuard<'s> {
     #[inline(always)]
     fn drop(&mut self) {}
 }
 
 #[macro_export]
-macro_rules! make_lease {
+macro_rules! make_scope {
     ($name:ident) => {
-        let $name = unsafe { $crate::__::LeaseGuard::forge_lease() };
-        let _guard = $crate::__::LeaseGuard::new(&$name);
+        let $name = unsafe { $crate::__::ScopeGuard::forge_scope() };
+        let _guard = $crate::__::ScopeGuard::new(&$name);
     };
 }
 
@@ -37,13 +37,13 @@ pub struct TypeMarker<T: ?Sized>(Invariant<T>);
 
 impl<T: ?Sized> TypeMarker<T> {
     #[inline(always)]
-    pub unsafe fn into_place<P: IntoPlace<Type = T>>(place: P) -> (P::Place, Self) {
-        (unsafe { place.into_place() }, Self(PhantomData))
+    pub unsafe fn materialize<P: IntoPlace<Type = T>>(place: P) -> (P::Place, Self) {
+        (unsafe { place.materialize() }, Self(PhantomData))
     }
 
     #[inline(always)]
-    pub fn forget_loan<'s>(&self, _: &'s Lease<'s>, loan: Loan<'s, T>) {
-        core::mem::forget(loan)
+    pub fn forget_out<'s>(&self, _: &'s Scope<'s>, out: Init<ScopedMem<'s, T>>) {
+        core::mem::forget(out)
     }
 }
 
@@ -57,18 +57,18 @@ macro_rules! emplace {
         //  - otherwise, we it gets initialized;
         //  - this stays true if we're in a `async` block, as the block must be pinned
         //    to be executed, and `Pin` guarantees that the frame will be dropped.
-        let (mut $out, _type) = unsafe { $crate::__::TypeMarker::into_place($out) };
+        let (mut $out, _type) = unsafe { $crate::__::TypeMarker::materialize($out) };
         {
-            $crate::make_lease!(lease);
-            let $out = lease.borrow(&mut $out);
-            let _loan = $block;
+            $crate::make_scope!(scope);
+            let $out = scope.borrow(&mut $out);
+            let _init = $block;
             // Unfortunately, this suppresses warnings on all unreachable code in the rest
             // of the function, not just for this line.
             #[allow(unreachable_code)]
             {
-                _type.forget_loan(&lease, _loan)
+                _type.forget_out(&scope, _init)
             }
         }
-        unsafe { $crate::place::Place::assume_init($out) }
+        unsafe { $crate::Place::finalize($out) }
     }};
 }

@@ -11,20 +11,24 @@ use core::mem::MaybeUninit;
 #[macro_use]
 pub mod __;
 
-pub mod init;
-pub mod mem;
-pub mod place;
+// Private modules
+mod init;
 mod polyfill;
-pub mod slice;
 
-pub use init::Init;
+// Public modules
+pub mod place;
+pub mod slice;
+pub mod mem;
+
+// Reexports
+#[doc(no_inline)]
+pub use mem::{ScopedMem, Mem};
+#[doc(no_inline)]
 pub use place::{IntoPlace, Place};
 
-pub type Slot<'s, T> = &'s mut MaybeUninit<T>;
-pub type Uninit<'s, T> = mem::OwnedMem<'s, T>;
-pub type Own<'s, T> = Init<mem::OwnedMem<'s, T>>;
-pub type Out<'s, T> = mem::LeasedMem<'s, T>;
-pub type Loan<'s, T> = Init<mem::LeasedMem<'s, T>>;
+pub use init::Init;
+
+pub type Own<'s, T> = Init<Mem<'s, T>>;
 
 // TODO: constify everything that can be constified.
 
@@ -34,7 +38,6 @@ pub fn emplace_box<T>() -> impl IntoPlace<Type = T, Init = Box<T>> {
 
     unsafe impl<T> Place for BoxPlace<T> {
         type Type = T;
-
         type Init = Box<T>;
 
         #[inline(always)]
@@ -48,7 +51,7 @@ pub fn emplace_box<T>() -> impl IntoPlace<Type = T, Init = Box<T>> {
         }
 
         #[inline(always)]
-        unsafe fn assume_init(self) -> Self::Init {
+        unsafe fn finalize(self) -> Self::Init {
             unsafe { polyfill::box_assume_init(self.0) }
         }
     }
@@ -57,7 +60,7 @@ pub fn emplace_box<T>() -> impl IntoPlace<Type = T, Init = Box<T>> {
 }
 
 #[inline(always)]
-pub fn stack_slot<T>() -> MaybeUninit<T> {
+pub fn place<T>() -> MaybeUninit<T> {
     MaybeUninit::uninit()
 }
 
@@ -69,9 +72,9 @@ mod tests {
     #[test]
     fn it_works() {
         let b: Box<i32> = emplace!(emplace_box() => out {
-            let filled: Loan<'_, i32> = out.set(50);
+            let filled: Init<ScopedMem<'_, i32>> = out.set(50);
             let val = *filled;
-            let out: Out<'_, i32> = Loan::drop(filled);
+            let out: ScopedMem<'_, i32> = Init::drop(filled);
             out.set(val * 2)
         });
 
@@ -109,7 +112,7 @@ mod tests {
 
         let mut dropped = false;
 
-        let slot = &mut stack_slot();
+        let slot = &mut place();
         let own = Own::new_in(slot, SetOnDrop(&mut dropped));
         drop(own);
 

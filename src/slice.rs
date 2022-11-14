@@ -183,7 +183,7 @@ where
     type Init = ();
 
     #[inline]
-    unsafe fn into_place(self) -> Self::Place {
+    unsafe fn materialize(self) -> Self::Place {
         let elem = unsafe { self.slice.as_mut_ptr().add(self.pos) };
         let len = &mut self.slice.len;
         let shift = *len - self.pos;
@@ -237,7 +237,7 @@ mod private {
         }
 
         #[inline(always)]
-        unsafe fn assume_init(self) -> Self::Init {
+        unsafe fn finalize(self) -> Self::Init {
             *self.len += 1;
             core::mem::forget(self);
         }

@@ -1,22 +1,21 @@
 use core::marker::PhantomData;
+use core::mem::MaybeUninit;
 use core::ptr::NonNull;
 
 use crate::init::Init;
 use crate::place::Place;
-use crate::Slot;
 
 type Invariant<T> = PhantomData<core::cell::Cell<T>>;
 type Covariant<T> = PhantomData<T>;
 
-/// An owned, untyped chunk of memory.
 // TODO: document more
 #[repr(transparent)]
-pub struct OwnedMem<'scope, T: ?Sized> {
+pub struct Mem<'scope, T: ?Sized> {
     ptr: NonNull<T>,
     _marker: Covariant<&'scope T>,
 }
 
-impl<'s, T: ?Sized> OwnedMem<'s, T> {
+impl<'s, T: ?Sized> Mem<'s, T> {
     // SAFETY: ptr must be live and unaliased during `'s`.
     #[inline(always)]
     pub unsafe fn new_unchecked(ptr: *mut T) -> Self {
@@ -27,49 +26,49 @@ impl<'s, T: ?Sized> OwnedMem<'s, T> {
     }
 
     #[inline(always)]
-    pub fn from_slot(r: Slot<'s, T>) -> Self
+    pub fn from_uninit(uninit: &'s mut MaybeUninit<T>) -> Self
     where
         T: Sized,
     {
-        unsafe { Self::new_unchecked(r.as_mut_ptr()) }
+        unsafe { Self::new_unchecked(uninit.as_mut_ptr()) }
     }
 }
 
-/// A leased, untyped chunk of memory.
+// TODO: document
 #[repr(transparent)]
-pub struct LeasedMem<'scope, T: ?Sized> {
+pub struct ScopedMem<'scope, T: ?Sized> {
     ptr: NonNull<T>,
     _marker: Invariant<&'scope T>,
 }
 
 // TODO: document
-pub struct Lease<'scope>(Invariant<&'scope ()>);
+pub struct Scope<'scope>(Invariant<&'scope ()>);
 
-impl<'s> Lease<'s> {
+impl<'s> Scope<'s> {
     #[inline(always)]
     pub(crate) unsafe fn forge() -> Self {
-        Lease(PhantomData)
+        Scope(PhantomData)
     }
 
     #[inline(always)]
-    pub fn borrow<P: Place>(&self, place: &'s mut P) -> LeasedMem<'s, P::Type> {
-        LeasedMem {
+    pub fn borrow<P: Place>(&self, place: &'s mut P) -> ScopedMem<'s, P::Type> {
+        ScopedMem {
             ptr: unsafe { NonNull::new_unchecked(place.as_mut_ptr()) },
             _marker: PhantomData,
         }
     }
 
     #[inline(always)]
-    pub fn borrow_slot<T>(&self, slot: Slot<'s, T>) -> LeasedMem<'s, T> {
-        LeasedMem {
-            ptr: NonNull::from(slot).cast(),
+    pub fn borrow_uninit<T>(&self, uninit: &'s mut MaybeUninit<T>) -> ScopedMem<'s, T> {
+        ScopedMem {
+            ptr: NonNull::from(uninit).cast(),
             _marker: PhantomData,
         }
     }
 
     #[inline(always)]
-    pub unsafe fn borrow_ptr<T: ?Sized>(&self, ptr: *mut T) -> LeasedMem<'s, T> {
-        LeasedMem {
+    pub unsafe fn borrow_ptr<T: ?Sized>(&self, ptr: *mut T) -> ScopedMem<'s, T> {
+        ScopedMem {
             ptr: unsafe { NonNull::new_unchecked(ptr) },
             _marker: PhantomData,
         }
@@ -94,12 +93,12 @@ macro_rules! impl_place_trait {
             }
 
             #[inline(always)]
-            unsafe fn assume_init(self) -> Self::Init {
+            unsafe fn finalize(self) -> Self::Init {
                 unsafe { Init::from_place(self) }
             }
         }
     };
 }
 
-impl_place_trait!(OwnedMem);
-impl_place_trait!(LeasedMem);
+impl_place_trait!(Mem);
+impl_place_trait!(ScopedMem);

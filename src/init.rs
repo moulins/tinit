@@ -1,10 +1,9 @@
-use core::mem::ManuallyDrop;
+use core::mem::{ManuallyDrop, MaybeUninit};
 use core::ops::{Deref, DerefMut};
 use core::ptr;
 
 use crate::place::{IntoPlace, Place};
-use crate::Slot;
-use crate::Uninit;
+use crate::mem::Mem;
 
 // TODO: impl all useful traits
 // TODO: document methods and safety invariants
@@ -29,10 +28,10 @@ impl<P: Place> DerefMut for Init<P> {
     }
 }
 
-impl<'s, T> Init<Uninit<'s, T>> {
+impl<'s, T> Init<Mem<'s, T>> {
     #[inline(always)]
-    pub fn new_in(slot: Slot<'s, T>, value: T) -> Self {
-        Uninit::from_slot(slot).set(value)
+    pub fn new_in(uninit: &'s mut MaybeUninit<T>, value: T) -> Self {
+        Mem::from_uninit(uninit).set(value)
     }
 }
 
@@ -93,7 +92,7 @@ where
     #[inline(always)]
     pub fn finalize(this: Self) -> P::Init {
         // SAFETY: `place` contains a valid T
-        unsafe { Self::forget(this).assume_init() }
+        unsafe { Self::forget(this).finalize() }
     }
 }
 

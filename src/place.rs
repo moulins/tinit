@@ -1,7 +1,7 @@
 use core::mem::MaybeUninit;
 use core::ptr::NonNull;
 
-use crate::{Loan, Out};
+use crate::{Init, ScopedMem};
 
 pub trait IntoPlace: Sized {
     type Type: ?Sized;
@@ -9,7 +9,7 @@ pub trait IntoPlace: Sized {
     type Init;
 
     // Safety: forgetting or leaking the returned place is UB
-    unsafe fn into_place(self) -> Self::Place;
+    unsafe fn materialize(self) -> Self::Place;
 
     #[inline(always)]
     fn set(self, value: Self::Type) -> Self::Init
@@ -17,24 +17,24 @@ pub trait IntoPlace: Sized {
         Self::Type: Sized,
     {
         unsafe {
-            let mut place = self.into_place();
+            let mut place = self.materialize();
             core::ptr::write(place.as_mut_ptr(), value);
-            place.assume_init()
+            place.finalize()
         }
     }
 
     #[inline(always)]
     fn with(
         self,
-        init: impl for<'s> FnOnce(Out<'s, Self::Type>) -> Loan<'s, Self::Type>,
+        init: impl for<'s> FnOnce(ScopedMem<'s, Self::Type>) -> Init<ScopedMem<'s, Self::Type>>,
     ) -> Self::Init {
-        let mut place = unsafe { self.into_place() };
+        let mut place = unsafe { self.materialize() };
         {
-            make_lease!(lease);
-            let out = lease.borrow(&mut place);
+            make_scope!(scope);
+            let out = scope.borrow(&mut place);
             core::mem::forget(init(out));
         }
-        unsafe { place.assume_init() }
+        unsafe { place.finalize() }
     }
 }
 
@@ -50,7 +50,7 @@ where
     type Init = P::Init;
 
     #[inline(always)]
-    unsafe fn into_place(self) -> Self::Place {
+    unsafe fn materialize(self) -> Self::Place {
         (self.0)()
     }
 }
@@ -65,7 +65,7 @@ pub unsafe trait Place: Sized {
     fn as_mut_ptr(&mut self) -> *mut Self::Type;
 
     // Safety: the place must be initialized.
-    unsafe fn assume_init(self) -> Self::Init;
+    unsafe fn finalize(self) -> Self::Init;
 
     #[inline(always)]
     fn as_non_null(&mut self) -> NonNull<Self::Type> {
@@ -95,7 +95,7 @@ impl<P: Place> IntoPlace for P {
     type Init = P::Init;
 
     #[inline(always)]
-    unsafe fn into_place(self) -> Self::Place {
+    unsafe fn materialize(self) -> Self::Place {
         self
     }
 }

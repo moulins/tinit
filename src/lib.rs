@@ -19,6 +19,7 @@ mod polyfill;
 pub mod place;
 pub mod slice;
 pub mod mem;
+pub mod uninit;
 
 // Reexports
 #[doc(no_inline)]
@@ -29,11 +30,14 @@ pub use place::{IntoPlace, Place};
 pub use init::Init;
 
 pub type Own<'s, T> = Init<Mem<'s, T>>;
+pub type ScopedRef<'s, T> = Init<mem::ScopedMem<'s, T>>;
 
 // TODO: constify everything that can be constified.
 
 #[inline(always)]
 pub fn emplace_box<T>() -> impl IntoPlace<Type = T, Init = Box<T>> {
+    use uninit::{UninitMut, UninitRef};
+
     struct BoxPlace<T>(Box<MaybeUninit<T>>);
 
     unsafe impl<T> Place for BoxPlace<T> {
@@ -41,13 +45,13 @@ pub fn emplace_box<T>() -> impl IntoPlace<Type = T, Init = Box<T>> {
         type Init = Box<T>;
 
         #[inline(always)]
-        fn as_ptr(&self) -> *const Self::Type {
-            self.0.as_ptr()
+        fn raw_ref(&self) -> UninitRef<'_, Self::Type> {
+            (&*self.0).into()
         }
 
         #[inline(always)]
-        fn as_mut_ptr(&mut self) -> *mut Self::Type {
-            self.0.as_mut_ptr()
+        fn raw_mut(&mut self) -> UninitMut<'_, Self::Type> {
+            (&mut *self.0).into()
         }
 
         #[inline(always)]

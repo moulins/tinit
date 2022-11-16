@@ -1,7 +1,7 @@
 use core::marker::PhantomData;
 
-use crate::mem::Scope;
-use crate::{Init, IntoPlace, ScopedMem};
+use crate::mem::{Scope, ScopedMem};
+use crate::{Init, IntoPlace};
 
 type Invariant<T> = PhantomData<core::cell::Cell<T>>;
 

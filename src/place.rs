@@ -1,7 +1,7 @@
-use core::mem::MaybeUninit;
-use core::ptr::NonNull;
+use core::mem::{ManuallyDrop, MaybeUninit};
 
-use crate::{Init, ScopedMem};
+use crate::uninit::{UninitMut, UninitRef};
+use crate::{ScopedMem, ScopedRef};
 
 pub trait IntoPlace: Sized {
     type Type: ?Sized;
@@ -16,17 +16,15 @@ pub trait IntoPlace: Sized {
     where
         Self::Type: Sized,
     {
-        unsafe {
-            let mut place = self.materialize();
-            core::ptr::write(place.as_mut_ptr(), value);
-            place.finalize()
-        }
+        let mut place = unsafe { self.materialize() };
+        place.raw_mut().write(value);
+        unsafe { place.finalize() }
     }
 
     #[inline(always)]
     fn with(
         self,
-        init: impl for<'s> FnOnce(ScopedMem<'s, Self::Type>) -> Init<ScopedMem<'s, Self::Type>>,
+        init: impl for<'s> FnOnce(ScopedMem<'s, Self::Type>) -> ScopedRef<'s, Self::Type>,
     ) -> Self::Init {
         let mut place = unsafe { self.materialize() };
         {
@@ -60,32 +58,24 @@ pub unsafe trait Place: Sized {
     type Type: ?Sized;
     type Init;
 
-    fn as_ptr(&self) -> *const Self::Type;
+    fn raw_ref(&self) -> UninitRef<'_, Self::Type>;
 
-    fn as_mut_ptr(&mut self) -> *mut Self::Type;
+    fn raw_mut(&mut self) -> UninitMut<'_, Self::Type>;
 
     // Safety: the place must be initialized.
     unsafe fn finalize(self) -> Self::Init;
 
+    // TODO: should this be unsafe? technically no, as creating a Place
+    // is already unsafe in the general case.
     #[inline(always)]
-    fn as_non_null(&mut self) -> NonNull<Self::Type> {
-        unsafe { NonNull::new_unchecked(self.as_mut_ptr()) }
-    }
-
-    #[inline(always)]
-    fn as_uninit(&self) -> &MaybeUninit<Self::Type>
+    fn leak<'a>(self) -> UninitMut<'a, Self::Type>
     where
-        Self::Type: Sized,
+        Self: 'a,
     {
-        unsafe { &*(self.as_ptr() as *const _) }
-    }
-
-    #[inline(always)]
-    fn as_uninit_mut(&mut self) -> &mut MaybeUninit<Self::Type>
-    where
-        Self::Type: Sized,
-    {
-        unsafe { &mut *(self.as_mut_ptr() as *mut _) }
+        // Disable the drop impl of the place.
+        let mut this = ManuallyDrop::new(self);
+        // SAFETY: the place has been 'disabled', so we can soundly extend the lifetime.
+        unsafe { this.raw_mut().transmute_lt() }
     }
 }
 
@@ -121,24 +111,21 @@ where
 
     #[inline(always)]
     fn len(&self) -> usize {
-        let ptr = unsafe { NonNull::new_unchecked(self.as_ptr() as *mut _) };
-        <Self::Type as sealed::SliceLike>::len(ptr)
+        <Self::Type as sealed::SliceLike>::len(self.raw_ref().into())
     }
 
     #[inline(always)]
     fn as_uninit_slice(&self) -> &[MaybeUninit<Self::Elem>] {
-        let ptr = unsafe { NonNull::new_unchecked(self.as_ptr() as *mut _) };
-        let data = <Self::Type as sealed::SliceLike>::as_elem_ptr(ptr);
+        let ptr = self.raw_ref().into();
         let len = <Self::Type as sealed::SliceLike>::len(ptr);
-        unsafe { core::slice::from_raw_parts(data.as_ptr() as *mut _, len) }
+        unsafe { core::slice::from_raw_parts(ptr.cast().as_ptr(), len) }
     }
 
     #[inline(always)]
     fn as_uninit_slice_mut(&mut self) -> &mut [MaybeUninit<Self::Elem>] {
-        let ptr = self.as_non_null();
-        let data = <Self::Type as sealed::SliceLike>::as_elem_ptr(ptr);
+        let ptr = self.raw_ref().into();
         let len = <Self::Type as sealed::SliceLike>::len(ptr);
-        unsafe { core::slice::from_raw_parts_mut(data.as_ptr() as *mut _, len) }
+        unsafe { core::slice::from_raw_parts_mut(ptr.cast().as_ptr(), len) }
     }
 }
 
@@ -148,7 +135,6 @@ mod sealed {
     pub trait SliceLike {
         type Elem;
         fn len(ptr: NonNull<Self>) -> usize;
-        fn as_elem_ptr(ptr: NonNull<Self>) -> NonNull<Self::Elem>;
     }
 
     impl<const N: usize, T> SliceLike for [T; N] {
@@ -158,11 +144,6 @@ mod sealed {
         fn len(_: NonNull<Self>) -> usize {
             N
         }
-
-        #[inline(always)]
-        fn as_elem_ptr(ptr: NonNull<Self>) -> NonNull<Self::Elem> {
-            ptr.cast()
-        }
     }
 
     impl<T> SliceLike for [T] {
@@ -171,11 +152,6 @@ mod sealed {
         #[inline(always)]
         fn len(ptr: NonNull<Self>) -> usize {
             ptr.len()
-        }
-
-        #[inline(always)]
-        fn as_elem_ptr(ptr: NonNull<Self>) -> NonNull<Self::Elem> {
-            ptr.cast()
         }
     }
 }

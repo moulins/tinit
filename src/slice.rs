@@ -38,12 +38,12 @@ where
 
     #[inline(always)]
     pub fn as_ptr(&self) -> *const T {
-        self.place.as_ptr() as *const T
+        self.place.raw_ref().as_ptr().cast()
     }
 
     #[inline(always)]
     pub fn as_mut_ptr(&mut self) -> *mut T {
-        self.place.as_mut_ptr() as *mut T
+        self.place.raw_mut().as_mut_ptr().cast()
     }
 
     #[inline]
@@ -109,14 +109,14 @@ where
         unsafe { ptr::read(&this.place) }
     }
 
+    // TODO: see Place::leak
     #[inline(always)]
     pub fn leak<'a>(self) -> &'a mut [T]
     where
         P: 'a,
     {
         let len = self.len();
-        let p = Self::forget(self).as_mut_ptr();
-
+        let p = Self::forget(self).leak().as_mut_ptr();
         // SAFETY: `place` contains a valid `[T]`, and the lifetime is properly constrained.
         unsafe { core::slice::from_raw_parts_mut(p.cast(), len) }
     }
@@ -177,9 +177,7 @@ where
     P: SlicePlace<Elem = T>,
 {
     type Type = T;
-
     type Place = SliceElem<'a, T>;
-
     type Init = ();
 
     #[inline]
@@ -214,6 +212,8 @@ where
 
 use private::SliceElem;
 mod private {
+    use crate::uninit::{UninitMut, UninitRef};
+
     use super::*;
 
     pub struct SliceElem<'a, T> {
@@ -226,14 +226,12 @@ mod private {
         type Type = T;
         type Init = ();
 
-        #[inline(always)]
-        fn as_ptr(&self) -> *const Self::Type {
-            self.elem
+        fn raw_ref(&self) -> UninitRef<'_, Self::Type> {
+            unsafe { UninitRef::new_unchecked(self.elem) }
         }
 
-        #[inline(always)]
-        fn as_mut_ptr(&mut self) -> *mut Self::Type {
-            self.elem
+        fn raw_mut(&mut self) -> UninitMut<'_, Self::Type> {
+            unsafe { UninitMut::new_unchecked(self.elem) }
         }
 
         #[inline(always)]

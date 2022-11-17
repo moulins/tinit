@@ -44,7 +44,7 @@ impl<P: Place> Slot<P::Init> for P {
 }
 
 pub unsafe trait Place: Sized {
-    // Technically could be deduced from Self::Init, but makes the trait easier to use. 
+    // Technically could be deduced from Self::Init, but makes the trait easier to use.
     type Target: ?Sized;
     type Init: Deref<Target = Self::Target>;
 

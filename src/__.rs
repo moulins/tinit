@@ -46,7 +46,7 @@ impl<T: ?Sized> TypeMarker<T> {
     }
 
     #[inline(always)]
-    pub fn forget_init<'s>(&self, _: &'s Scope<'s>, init: Init<ScopedMem<'s, T>>) {
+    pub fn expect_init<'s>(&self, _: &'s Scope<'s>, init: Init<ScopedMem<'s, T>>) {
         core::mem::forget(init)
     }
 }
@@ -68,13 +68,7 @@ macro_rules! emplace {
         {
             $crate::let_scope!(scope);
             let $place = scope.borrow(&mut $place);
-            let _init = $block;
-            // Unfortunately, this suppresses warnings on all unreachable code in the rest
-            // of the function, not just for this line.
-            #[allow(unreachable_code)]
-            {
-                _type.forget_init(&scope, _init)
-            }
+            _type.expect_init(&scope, $block)
         }
         unsafe { $crate::Place::assume_init($place) }
     }};

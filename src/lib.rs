@@ -25,7 +25,7 @@ pub mod uninit;
 #[doc(no_inline)]
 pub use mem::{Mem, ScopedMem};
 #[doc(no_inline)]
-pub use place::{Slot, Place};
+pub use place::{Place, Slot};
 
 pub use init::Init;
 

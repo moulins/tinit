@@ -1,15 +1,18 @@
+use core::marker::PhantomData;
 use core::mem::{ManuallyDrop, MaybeUninit};
 use core::ops::{Deref, DerefMut};
 use core::{ptr, slice};
 
 use crate::init::Init;
-use crate::place::{Slot, Place, SlicePlace};
+use crate::place::{Place, SlicePlace, Slot};
 
 // TODO: document
 // TODO: implement the full Vec API.
 pub struct Slice<P: SlicePlace> {
     place: P,
     len: usize,
+    // We logically own the value stored in the place.
+    _marker: PhantomData<P::Init>,
 }
 
 impl<T, P> Slice<P>
@@ -18,7 +21,11 @@ where
 {
     #[inline(always)]
     pub fn new(place: P) -> Self {
-        Self { place, len: 0 }
+        Self {
+            place,
+            len: 0,
+            _marker: PhantomData,
+        }
     }
 
     #[inline(always)]

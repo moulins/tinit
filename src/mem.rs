@@ -5,13 +5,15 @@ use crate::init::Init;
 use crate::place::Place;
 use crate::uninit::{UninitMut, UninitRef};
 
-type Invariant<'a> = PhantomData<fn(&'a ()) -> &'a ()>;
+// Note: ideally, this would be bivariant, but bivariant pointers don't exist in Rust.
+type Pointer<T> = NonNull<T>;
 
 // TODO: document
 #[repr(transparent)]
 pub struct Mem<'scope, T: ?Sized> {
-    ptr: NonNull<T>,
-    _marker: PhantomData<&'scope T>,
+    ptr: Pointer<T>,
+    // We don't actually store any T
+    _marker: PhantomData<&'scope ()>,
 }
 
 impl<'s, T: ?Sized> Mem<'s, T> {
@@ -36,8 +38,9 @@ impl<'s, T: ?Sized> Mem<'s, T> {
 // TODO: document
 #[repr(transparent)]
 pub struct ScopedMem<'scope, T: ?Sized> {
-    ptr: NonNull<T>,
-    _marker: PhantomData<(&'scope T, Invariant<'scope>)>,
+    ptr: Pointer<T>,
+    // The backing memory is logically consumed when the scope is exited.
+    _marker: PhantomData<fn(Mem<'scope, T>) -> &'scope ()>,
 }
 
 macro_rules! impl_place_trait {
@@ -68,7 +71,7 @@ impl_place_trait!(Mem);
 impl_place_trait!(ScopedMem);
 
 // TODO: document
-pub struct Scope<'scope>(Invariant<'scope>);
+pub struct Scope<'scope>(PhantomData<fn(&'scope ()) -> &'scope ()>);
 
 impl<'s> Scope<'s> {
     #[inline(always)]

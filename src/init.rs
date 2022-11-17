@@ -1,14 +1,19 @@
+use core::marker::PhantomData;
 use core::mem::{ManuallyDrop, MaybeUninit};
 use core::ops::{Deref, DerefMut};
 use core::ptr;
 
 use crate::mem::Mem;
-use crate::place::{Slot, Place};
+use crate::place::{Place, Slot};
 
 // TODO: impl all useful traits
 // TODO: document methods and safety invariants
 #[repr(transparent)]
-pub struct Init<P: Place>(P);
+pub struct Init<P: Place> {
+    place: P,
+    // We logically own the value stored in the place.
+    _marker: PhantomData<P::Init>,
+}
 
 impl<P: Place> Deref for Init<P> {
     type Target = P::Target;
@@ -16,7 +21,7 @@ impl<P: Place> Deref for Init<P> {
     #[inline(always)]
     fn deref(&self) -> &Self::Target {
         // SAFETY: per our invariants, we contain a valid `T`.
-        unsafe { self.0.deref_place().into_ref() }
+        unsafe { self.place.deref_place().into_ref() }
     }
 }
 
@@ -24,7 +29,7 @@ impl<P: Place> DerefMut for Init<P> {
     #[inline(always)]
     fn deref_mut(&mut self) -> &mut Self::Target {
         // SAFETY: per our invariants, we contain a valid `T`.
-        unsafe { self.0.deref_place_mut().into_mut() }
+        unsafe { self.place.deref_place_mut().into_mut() }
     }
 }
 
@@ -41,7 +46,10 @@ where
 {
     #[inline(always)]
     pub unsafe fn from_place(place: P) -> Self {
-        Self(place)
+        Self {
+            place,
+            _marker: PhantomData,
+        }
     }
 
     #[inline]
@@ -57,7 +65,7 @@ where
         // Disable the drop impl.
         let this = ManuallyDrop::new(this);
         // SAFETY: `this` isn't accessed nor dropped after this line.
-        unsafe { ptr::read(&this.0) }
+        unsafe { ptr::read(&this.place) }
     }
 
     #[inline(always)]
@@ -99,6 +107,6 @@ impl<P: Place> Drop for Init<P> {
     #[inline]
     fn drop(&mut self) {
         // SAFETY: `place` contains a valid T, and is never accessed after this line.
-        unsafe { self.0.deref_place_mut().drop_in_place() }
+        unsafe { self.place.deref_place_mut().drop_in_place() }
     }
 }

@@ -1,96 +1,75 @@
 use core::mem::{ManuallyDrop, MaybeUninit};
+use core::ops::Deref;
 
 use crate::uninit::{UninitMut, UninitRef};
 use crate::{ScopedMem, ScopedRef};
 
-pub trait IntoPlace: Sized {
-    type Type: ?Sized;
-    type Place: Place<Type = Self::Type, Init = Self::Init>;
-    type Init;
+pub trait Slot<V: Deref>: Sized {
+    type Place: Place<Target = V::Target, Init = V>;
 
-    // Safety: forgetting or leaking the returned place is UB
-    unsafe fn materialize(self) -> Self::Place;
+    fn into_place(self) -> Self::Place;
 
     #[inline(always)]
-    fn set(self, value: Self::Type) -> Self::Init
+    fn set(self, value: V::Target) -> V
     where
-        Self::Type: Sized,
+        V::Target: Sized,
     {
-        let mut place = unsafe { self.materialize() };
-        place.raw_mut().write(value);
-        unsafe { place.finalize() }
+        let mut place = self.into_place();
+        place.deref_place_mut().write(value);
+        unsafe { place.assume_init() }
     }
 
     #[inline(always)]
     fn with(
         self,
-        init: impl for<'s> FnOnce(ScopedMem<'s, Self::Type>) -> ScopedRef<'s, Self::Type>,
-    ) -> Self::Init {
-        let mut place = unsafe { self.materialize() };
+        init: impl for<'s> FnOnce(ScopedMem<'s, V::Target>) -> ScopedRef<'s, V::Target>,
+    ) -> V {
+        let mut place = self.into_place();
         {
-            make_scope!(scope);
+            let_scope!(scope);
             let out = scope.borrow(&mut place);
             core::mem::forget(init(out));
         }
-        unsafe { place.finalize() }
+        unsafe { place.assume_init() }
     }
 }
 
-pub struct PlaceFn<F>(pub F);
-
-impl<F, P> IntoPlace for PlaceFn<F>
-where
-    F: FnOnce() -> P,
-    P: Place,
-{
-    type Type = P::Type;
+impl<P: Place> Slot<P::Init> for P {
     type Place = P;
-    type Init = P::Init;
 
     #[inline(always)]
-    unsafe fn materialize(self) -> Self::Place {
-        (self.0)()
+    fn into_place(self) -> Self::Place {
+        self
     }
 }
 
-// TODO: what about Send + Sync?
 pub unsafe trait Place: Sized {
-    type Type: ?Sized;
-    type Init;
+    // Technically could be deduced from Self::Init, but makes the trait easier to use. 
+    type Target: ?Sized;
+    type Init: Deref<Target = Self::Target>;
 
-    fn raw_ref(&self) -> UninitRef<'_, Self::Type>;
+    fn deref_place(&self) -> UninitRef<'_, Self::Target>;
 
-    fn raw_mut(&mut self) -> UninitMut<'_, Self::Type>;
+    fn deref_place_mut(&mut self) -> UninitMut<'_, Self::Target>;
 
     // Safety: the place must be initialized.
-    unsafe fn finalize(self) -> Self::Init;
+    unsafe fn assume_init(self) -> Self::Init;
 
     // TODO: should this be unsafe? technically no, as creating a Place
-    // is already unsafe in the general case.
+    // that *must* be dropped requires unsafe code.
     #[inline(always)]
-    fn leak<'a>(self) -> UninitMut<'a, Self::Type>
+    fn leak<'a>(self) -> UninitMut<'a, Self::Target>
     where
         Self: 'a,
     {
         // Disable the drop impl of the place.
         let mut this = ManuallyDrop::new(self);
         // SAFETY: the place has been 'disabled', so we can soundly extend the lifetime.
-        unsafe { this.raw_mut().transmute_lt() }
+        unsafe { this.deref_place_mut().transmute_lt() }
     }
 }
 
-impl<P: Place> IntoPlace for P {
-    type Type = P::Type;
-    type Place = P;
-    type Init = P::Init;
-
-    #[inline(always)]
-    unsafe fn materialize(self) -> Self::Place {
-        self
-    }
-}
-
-/// A slice-like place. Implemented for slices and fixed-sized arrays.
+/// A slice-like place. Implemented for places to slices and fixed-sized arrays.
 // TODO: document more
 pub unsafe trait SlicePlace: Place {
     type Elem;
@@ -105,26 +84,26 @@ pub unsafe trait SlicePlace: Place {
 unsafe impl<P> SlicePlace for P
 where
     P: Place,
-    P::Type: sealed::SliceLike,
+    P::Target: sealed::SliceLike,
 {
-    type Elem = <Self::Type as sealed::SliceLike>::Elem;
+    type Elem = <Self::Target as sealed::SliceLike>::Elem;
 
     #[inline(always)]
     fn len(&self) -> usize {
-        <Self::Type as sealed::SliceLike>::len(self.raw_ref().into())
+        <Self::Target as sealed::SliceLike>::len(self.deref_place().into())
     }
 
     #[inline(always)]
     fn as_uninit_slice(&self) -> &[MaybeUninit<Self::Elem>] {
-        let ptr = self.raw_ref().into();
-        let len = <Self::Type as sealed::SliceLike>::len(ptr);
+        let ptr = self.deref_place().into();
+        let len = <Self::Target as sealed::SliceLike>::len(ptr);
         unsafe { core::slice::from_raw_parts(ptr.cast().as_ptr(), len) }
     }
 
     #[inline(always)]
     fn as_uninit_slice_mut(&mut self) -> &mut [MaybeUninit<Self::Elem>] {
-        let ptr = self.raw_ref().into();
-        let len = <Self::Type as sealed::SliceLike>::len(ptr);
+        let ptr = self.deref_place().into();
+        let len = <Self::Target as sealed::SliceLike>::len(ptr);
         unsafe { core::slice::from_raw_parts_mut(ptr.cast().as_ptr(), len) }
     }
 }

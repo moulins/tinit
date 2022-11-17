@@ -1,9 +1,9 @@
-use core::mem::ManuallyDrop;
+use core::mem::{ManuallyDrop, MaybeUninit};
 use core::ops::{Deref, DerefMut};
 use core::{ptr, slice};
 
 use crate::init::Init;
-use crate::place::{IntoPlace, Place, SlicePlace};
+use crate::place::{Slot, Place, SlicePlace};
 
 // TODO: document
 // TODO: implement the full Vec API.
@@ -38,38 +38,38 @@ where
 
     #[inline(always)]
     pub fn as_ptr(&self) -> *const T {
-        self.place.raw_ref().as_ptr().cast()
+        self.place.deref_place().as_ptr().cast()
     }
 
     #[inline(always)]
     pub fn as_mut_ptr(&mut self) -> *mut T {
-        self.place.raw_mut().as_mut_ptr().cast()
+        self.place.deref_place_mut().as_mut_ptr().cast()
     }
 
     #[inline]
     pub fn push(&mut self, elem: T) {
-        self.emplace().set(elem)
+        self.emplace().set(elem);
     }
 
     #[inline]
-    pub fn emplace(&mut self) -> SliceEmplace<'_, P> {
+    pub fn emplace(&mut self) -> SliceHole<'_, T> {
         let pos = self.len();
         if pos >= self.place.len() {
             panic_slice_full(pos)
         } else {
-            SliceEmplace { slice: self, pos }
+            unsafe { SliceHole::open(self, pos) }
         }
     }
 
     #[inline]
-    pub fn emplace_at(&mut self, pos: usize) -> SliceEmplace<'_, P> {
+    pub fn emplace_at(&mut self, pos: usize) -> SliceHole<'_, T> {
         let len = self.len();
         if len >= self.place.len() {
             panic_slice_full(len)
         } else if pos > len {
             panic!("index out of bounds");
         } else {
-            SliceEmplace { slice: self, pos }
+            unsafe { SliceHole::open(self, pos) }
         }
     }
 
@@ -167,86 +167,91 @@ fn panic_slice_not_full(len: usize, cap: usize) -> ! {
     panic!("slice isn't full (len: {len}, capacity: {cap})")
 }
 
-pub struct SliceEmplace<'a, P: SlicePlace> {
-    slice: &'a mut Slice<P>,
-    pos: usize,
+pub struct SliceHole<'a, T> {
+    len: &'a mut usize,
+    prefix: &'a mut [T],
+    // Only the first element is uninitialized
+    suffix: &'a mut [MaybeUninit<T>],
 }
 
-impl<'a, T, P> IntoPlace for SliceEmplace<'a, P>
-where
-    P: SlicePlace<Elem = T>,
-{
-    type Type = T;
-    type Place = SliceElem<'a, T>;
-    type Init = ();
+impl<'a, T> SliceHole<'a, T> {
+    // SAFETY: `0..=slice.len().contains(pos) && !slice.is_full()`
+    unsafe fn open<P: SlicePlace<Elem=T>>(slice: &'a mut Slice<P>, pos: usize) -> Self {
+        // 'Pre-poop our pants' so that leaking this place leaks all moved elements.
+        let len = &mut slice.len;
+        let suffix_len = core::mem::replace(len, pos) - pos;
+        let ptr = slice.place.deref_place_mut().as_mut_ptr() as *mut T;
 
-    #[inline]
-    unsafe fn materialize(self) -> Self::Place {
-        let elem = unsafe { self.slice.as_mut_ptr().add(self.pos) };
-        let len = &mut self.slice.len;
-        let shift = *len - self.pos;
-        unsafe { core::ptr::copy(elem, elem.add(1), shift) }
-        SliceElem { elem, shift, len }
-    }
-}
-
-impl<'a, T, P> SliceEmplace<'a, P>
-where
-    P: SlicePlace<Elem = T>,
-{
-    #[inline(always)]
-    pub fn filled(&self) -> &[T] {
-        self.slice
-    }
-
-    #[inline(always)]
-    pub fn filled_mut(&mut self) -> &mut [T] {
-        self.slice
+        Self {
+            len,
+            prefix: unsafe { slice::from_raw_parts_mut(ptr, pos) },
+            suffix: unsafe {
+                // Move suffix one element to the right to open the hole
+                let ptr = ptr.add(pos);
+                ptr::copy(ptr, ptr.add(1), suffix_len);
+                slice::from_raw_parts_mut(ptr.cast(), suffix_len + 1)
+            },
+        }
     }
 
     #[inline(always)]
     pub fn pos(&self) -> usize {
-        self.pos
+        self.prefix.len()
+    }
+
+    #[inline(always)]
+    pub fn split_ref(&self) -> (&[T], &[T]) {
+        let suffix = unsafe { &*(self.suffix.get_unchecked(1..) as *const _ as *const [T]) };
+        (self.prefix, suffix)
+    }
+
+    #[inline(always)]
+    pub fn split_mut(&mut self) -> (&mut [T], &mut [T]) {
+        let suffix = unsafe { &mut *(self.suffix.get_unchecked_mut(1..) as *mut _ as *mut [T]) };
+        (self.prefix, suffix)
+    }
+
+    #[inline(always)]
+    pub fn split_prefix(mut self) -> (&'a mut [T], impl Place<Init=&'a mut T>) {
+        (core::mem::take(&mut self.prefix), self)
     }
 }
 
-use private::SliceElem;
-mod private {
-    use crate::uninit::{UninitMut, UninitRef};
+unsafe impl<'a, T: 'a> Place for SliceHole<'a, T> {
+    type Target = T;
+    type Init = &'a mut T;
 
-    use super::*;
-
-    pub struct SliceElem<'a, T> {
-        pub(super) elem: *mut T,
-        pub(super) shift: usize,
-        pub(super) len: &'a mut usize,
+    #[inline(always)]
+    fn deref_place(&self) -> crate::uninit::UninitRef<'_, Self::Target> {
+        unsafe { self.suffix.get_unchecked(0).into() }
     }
 
-    unsafe impl<'a, T> Place for SliceElem<'a, T> {
-        type Type = T;
-        type Init = ();
-
-        fn raw_ref(&self) -> UninitRef<'_, Self::Type> {
-            unsafe { UninitRef::new_unchecked(self.elem) }
-        }
-
-        fn raw_mut(&mut self) -> UninitMut<'_, Self::Type> {
-            unsafe { UninitMut::new_unchecked(self.elem) }
-        }
-
-        #[inline(always)]
-        unsafe fn finalize(self) -> Self::Init {
-            *self.len += 1;
-            core::mem::forget(self);
-        }
+    #[inline(always)]
+    fn deref_place_mut(&mut self) -> crate::uninit::UninitMut<'_, Self::Target> {
+        unsafe { self.suffix.get_unchecked_mut(0).into() }
     }
 
-    impl<'a, T> Drop for SliceElem<'a, T> {
-        #[inline(always)]
-        fn drop(&mut self) {
-            unsafe {
-                core::ptr::copy(self.elem.add(1), self.elem, self.shift);
-            }
+    #[inline(always)]
+    unsafe fn assume_init(self) -> Self::Init {
+        // Element is initialized, put back correct length.
+        *self.len += self.suffix.len();
+        unsafe {
+            // Disable drop impl and return a reference to the initialized element.
+            let mut this = ManuallyDrop::new(self);
+            &mut *(this.suffix.as_mut_ptr() as *mut T)
+        }
+    }
+}
+
+impl<'a, T> Drop for SliceHole<'a, T> {
+    #[inline(always)]
+    fn drop(&mut self) {
+        // Shift back suffix and fix the length
+        let n = self.suffix.len() - 1;
+        let ptr = self.suffix.as_mut_ptr();
+        unsafe {
+            ptr::copy(ptr.add(1), ptr, n);
+            *self.len += n;
         }
     }
 }

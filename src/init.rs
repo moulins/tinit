@@ -2,8 +2,8 @@ use core::mem::{ManuallyDrop, MaybeUninit};
 use core::ops::{Deref, DerefMut};
 use core::ptr;
 
-use crate::place::{IntoPlace, Place};
 use crate::mem::Mem;
+use crate::place::{Slot, Place};
 
 // TODO: impl all useful traits
 // TODO: document methods and safety invariants
@@ -11,12 +11,12 @@ use crate::mem::Mem;
 pub struct Init<P: Place>(P);
 
 impl<P: Place> Deref for Init<P> {
-    type Target = P::Type;
+    type Target = P::Target;
 
     #[inline(always)]
     fn deref(&self) -> &Self::Target {
         // SAFETY: per our invariants, we contain a valid `T`.
-        unsafe { self.0.raw_ref().into_ref() }
+        unsafe { self.0.deref_place().into_ref() }
     }
 }
 
@@ -24,7 +24,7 @@ impl<P: Place> DerefMut for Init<P> {
     #[inline(always)]
     fn deref_mut(&mut self) -> &mut Self::Target {
         // SAFETY: per our invariants, we contain a valid `T`.
-        unsafe { self.0.raw_mut().into_mut() }
+        unsafe { self.0.deref_place_mut().into_mut() }
     }
 }
 
@@ -37,7 +37,7 @@ impl<'s, T> Init<Mem<'s, T>> {
 
 impl<T: ?Sized, P> Init<P>
 where
-    P: Place<Type = T>,
+    P: Place<Target = T>,
 {
     #[inline(always)]
     pub unsafe fn from_place(place: P) -> Self {
@@ -48,7 +48,7 @@ where
     pub fn drop(this: Self) -> P {
         let mut place = Self::forget(this);
         // SAFETY: `place` contains a valid T, and becomes logically uninit.
-        unsafe { place.raw_mut().drop_in_place() };
+        unsafe { place.deref_place_mut().drop_in_place() };
         place
     }
 
@@ -75,7 +75,7 @@ where
     {
         let place = Self::forget(this);
         // SAFETY: `place` contains a valid T, and becomes logically uninit.
-        (unsafe { place.raw_ref().read() }, place)
+        (unsafe { place.deref_place().read() }, place)
     }
 
     // TODO: see Place::leak
@@ -91,7 +91,7 @@ where
     #[inline(always)]
     pub fn finalize(this: Self) -> P::Init {
         // SAFETY: `place` contains a valid `T`.
-        unsafe { Self::forget(this).finalize() }
+        unsafe { Self::forget(this).assume_init() }
     }
 }
 
@@ -99,6 +99,6 @@ impl<P: Place> Drop for Init<P> {
     #[inline]
     fn drop(&mut self) {
         // SAFETY: `place` contains a valid T, and is never accessed after this line.
-        unsafe { self.0.raw_mut().drop_in_place() }
+        unsafe { self.0.deref_place_mut().drop_in_place() }
     }
 }

@@ -1,7 +1,8 @@
 use core::marker::PhantomData;
+use core::ops::Deref;
 
 use crate::mem::{Scope, ScopedMem};
-use crate::{Init, IntoPlace};
+use crate::{Init, Slot};
 
 type Invariant<T> = PhantomData<core::cell::Cell<T>>;
 
@@ -26,7 +27,7 @@ impl<'s> Drop for ScopeGuard<'s> {
 }
 
 #[macro_export]
-macro_rules! make_scope {
+macro_rules! let_scope {
     ($name:ident) => {
         let $name = unsafe { $crate::__::ScopeGuard::forge_scope() };
         let _guard = $crate::__::ScopeGuard::new(&$name);
@@ -37,38 +38,44 @@ pub struct TypeMarker<T: ?Sized>(Invariant<T>);
 
 impl<T: ?Sized> TypeMarker<T> {
     #[inline(always)]
-    pub unsafe fn materialize<P: IntoPlace<Type = T>>(place: P) -> (P::Place, Self) {
-        (unsafe { place.materialize() }, Self(PhantomData))
+    pub fn capture_type<V, S: Slot<V>>(slot: S) -> (S::Place, Self)
+    where
+        V: Deref<Target = T>,
+    {
+        (slot.into_place(), Self(PhantomData))
     }
 
     #[inline(always)]
-    pub fn forget_out<'s>(&self, _: &'s Scope<'s>, out: Init<ScopedMem<'s, T>>) {
-        core::mem::forget(out)
+    pub fn forget_init<'s>(&self, _: &'s Scope<'s>, init: Init<ScopedMem<'s, T>>) {
+        core::mem::forget(init)
     }
 }
 
 #[macro_export]
 macro_rules! emplace {
-    ($place:expr => $out:ident $block:block) => {{
-        let $out = $place;
+    ($slot:expr => $place:ident $block:block) => {{
+        let $place = $slot;
         // SAFETY:
         // We make sure the place is never leaked or forgotten:
         //  - if `$block` diverges, it gets dropped;
         //  - otherwise, we it gets initialized;
         //  - this stays true if we're in a `async` block, as the block must be pinned
         //    to be executed, and `Pin` guarantees that the frame will be dropped.
-        let (mut $out, _type) = unsafe { $crate::__::TypeMarker::materialize($out) };
+        //
+        // Not that the place type captured by TypeMarker isn't required for soundness;
+        // it only gives better error messages.
+        let (mut $place, _type) = $crate::__::TypeMarker::capture_type($place);
         {
-            $crate::make_scope!(scope);
-            let $out = scope.borrow(&mut $out);
+            $crate::let_scope!(scope);
+            let $place = scope.borrow(&mut $place);
             let _init = $block;
             // Unfortunately, this suppresses warnings on all unreachable code in the rest
             // of the function, not just for this line.
             #[allow(unreachable_code)]
             {
-                _type.forget_out(&scope, _init)
+                _type.forget_init(&scope, _init)
             }
         }
-        unsafe { $crate::Place::finalize($out) }
+        unsafe { $crate::Place::assume_init($place) }
     }};
 }

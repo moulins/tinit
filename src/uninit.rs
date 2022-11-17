@@ -25,7 +25,6 @@ pub struct UninitRef<'a, T: ?Sized> {
     _marker: PhantomData<&'a T>,
 }
 
-
 // UninitRef behaves like `&T`
 unsafe impl<T: Sync + ?Sized> Sync for UninitRef<'_, T> {}
 unsafe impl<T: Sync + ?Sized> Send for UninitRef<'_, T> {}

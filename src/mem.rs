@@ -43,21 +43,21 @@ pub struct ScopedMem<'scope, T: ?Sized> {
 macro_rules! impl_place_trait {
     ($name:ident) => {
         unsafe impl<'s, T: ?Sized> Place for $name<'s, T> {
-            type Type = T;
+            type Target = T;
             type Init = Init<Self>;
 
             #[inline(always)]
-            fn raw_ref(&self) -> UninitRef<'_, Self::Type> {
+            fn deref_place(&self) -> UninitRef<'_, Self::Target> {
                 unsafe { UninitRef::new_unchecked(self.ptr.as_ptr()) }
             }
 
             #[inline(always)]
-            fn raw_mut(&mut self) -> UninitMut<'_, Self::Type> {
+            fn deref_place_mut(&mut self) -> UninitMut<'_, Self::Target> {
                 unsafe { UninitMut::new_unchecked(self.ptr.as_ptr()) }
             }
 
             #[inline(always)]
-            unsafe fn finalize(self) -> Self::Init {
+            unsafe fn assume_init(self) -> Self::Init {
                 unsafe { Init::from_place(self) }
             }
         }
@@ -77,9 +77,9 @@ impl<'s> Scope<'s> {
     }
 
     #[inline(always)]
-    pub fn borrow<P: Place>(&self, slot: &'s mut P) -> ScopedMem<'s, P::Type> {
+    pub fn borrow<P: Place>(&self, slot: &'s mut P) -> ScopedMem<'s, P::Target> {
         ScopedMem {
-            ptr: slot.raw_mut().as_non_null(),
+            ptr: slot.deref_place_mut().as_non_null(),
             _marker: PhantomData,
         }
     }

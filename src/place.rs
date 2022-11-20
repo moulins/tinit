@@ -69,6 +69,12 @@ pub unsafe trait Place: Sized {
     }
 }
 
+pub trait Emplace: Deref {
+    type Place: Place<Target = Self::Target, Init = Self>;
+
+    fn emplace() -> Self::Place;
+}
+
 /// A slice-like place. Implemented for places to slices and fixed-sized arrays.
 // TODO: document more
 pub unsafe trait SlicePlace: Place {

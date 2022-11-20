@@ -6,7 +6,6 @@ use crate::{Init, Slot};
 
 type Invariant<T> = PhantomData<core::cell::Cell<T>>;
 
-#[doc(hidden)]
 pub struct ScopeGuard<'s>(Scope<'s>);
 
 impl<'s> ScopeGuard<'s> {

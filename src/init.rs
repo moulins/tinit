@@ -45,7 +45,7 @@ where
     P: Place<Target = T>,
 {
     #[inline(always)]
-    pub unsafe fn from_place(place: P) -> Self {
+    pub unsafe fn new_unchecked(place: P) -> Self {
         Self {
             place,
             _marker: PhantomData,

@@ -131,7 +131,7 @@ where
     #[inline]
     pub fn assert_full(self) -> Init<P> {
         if self.is_full() {
-            unsafe { Init::from_place(Self::forget(self)) }
+            unsafe { Init::new_unchecked(Self::forget(self)) }
         } else {
             panic_slice_not_full(self.len(), self.capacity())
         }

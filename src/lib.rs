@@ -3,7 +3,6 @@
 
 extern crate alloc;
 
-use alloc::boxed::Box;
 use core::mem::MaybeUninit;
 
 /// Macro definitions and utilities.
@@ -13,7 +12,6 @@ pub mod __;
 
 // Private modules
 mod init;
-mod polyfill;
 
 // Public modules
 pub mod mem;
@@ -25,7 +23,7 @@ pub mod uninit;
 #[doc(no_inline)]
 pub use mem::{Mem, ScopedMem};
 #[doc(no_inline)]
-pub use place::{Place, Slot};
+pub use place::{Emplace, Place, Slot};
 
 pub use init::Init;
 
@@ -35,49 +33,21 @@ pub type ScopedRef<'s, T> = Init<mem::ScopedMem<'s, T>>;
 // TODO: constify everything that can be constified.
 
 #[inline(always)]
-pub fn emplace_box<T>() -> impl Slot<Box<T>> {
-    use uninit::{UninitMut, UninitRef};
-
-    struct BoxPlace<T>(Box<MaybeUninit<T>>);
-
-    unsafe impl<T> Place for BoxPlace<T> {
-        type Target = T;
-        type Init = Box<T>;
-
-        #[inline(always)]
-        fn deref_place(&self) -> UninitRef<'_, Self::Target> {
-            (&*self.0).into()
-        }
-
-        #[inline(always)]
-        fn deref_place_mut(&mut self) -> UninitMut<'_, Self::Target> {
-            (&mut *self.0).into()
-        }
-
-        #[inline(always)]
-        unsafe fn assume_init(self) -> Self::Init {
-            unsafe { polyfill::box_assume_init(self.0) }
-        }
-    }
-
-    BoxPlace(polyfill::box_new_uninit())
-}
-
-#[inline(always)]
-pub fn slot<T>() -> MaybeUninit<T> {
+pub fn stack_slot<T>() -> MaybeUninit<T> {
     MaybeUninit::uninit()
 }
 
 #[cfg(test)]
 mod tests {
     extern crate std;
+    use std::prelude::v1::*;
 
     use super::*;
     use slice::Slice;
 
     #[test]
     fn it_works() {
-        let b: Box<i32> = emplace!(emplace_box() => out {
+        let b: Box<i32> = emplace!(Box::emplace() => out {
             let filled: Init<ScopedMem<'_, i32>> = out.set(50);
             let val = *filled;
             let out: ScopedMem<'_, i32> = Init::drop(filled);
@@ -89,7 +59,7 @@ mod tests {
 
     #[test]
     fn fibonacci() {
-        let numbers: Box<[u64; 64]> = emplace!(emplace_box() => out {
+        let numbers: Box<[u64; 64]> = emplace!(Box::emplace() => out {
             let mut slice = Slice::new(out);
 
             while !slice.is_full() {
@@ -118,7 +88,7 @@ mod tests {
 
         let mut dropped = false;
 
-        let slot = &mut slot();
+        let slot = &mut stack_slot();
         let own = Own::new_in(slot, SetOnDrop(&mut dropped));
         drop(own);
 

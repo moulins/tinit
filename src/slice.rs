@@ -97,9 +97,12 @@ where
 
     #[inline(always)]
     pub fn clear(&mut self) {
-        self.len = 0;
+        let len = core::mem::replace(&mut self.len, 0);
         // SAFETY: the slice is now empty, so drop all elements.
-        unsafe { ptr::drop_in_place(self.deref_mut()) }
+        unsafe { 
+            let slice = ptr::slice_from_raw_parts_mut(self.as_mut_ptr(), len);
+            ptr::drop_in_place(slice);
+        }
     }
 
     #[inline(always)]
